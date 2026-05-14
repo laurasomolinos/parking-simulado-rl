@@ -358,3 +358,21 @@ class ContinuousParkingEnv(gym.Env):
             plt.close(self.fig)
             self.fig = None
             self.ax = None
+
+
+#para ver como es el entorno simulado y probar que funciona 
+env = ContinuousParkingEnv(render_mode="human")
+
+obs, info = env.reset()
+
+for step in range(50):
+    action = env.action_space.sample()
+    obs, reward, terminated, truncated, info = env.step(action)
+    
+    env.render()
+    
+    if terminated or truncated:
+        print("Episodio terminado")
+        break
+
+env.close()
