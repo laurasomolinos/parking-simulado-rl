@@ -1,0 +1,7 @@
+gymnasium
+numpy
+matplotlib
+pandas
+tqdm
+torch
+ipykernel
