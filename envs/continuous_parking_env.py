@@ -209,7 +209,7 @@ class ContinuousParkingEnv(gym.Env):
         # Penalización pequeña por cada paso
         reward = -0.05
         # Recompensa por acercarse a la plaza
-        reward += 2.0 * (old_distance - new_distance)
+        reward += 3.0 * (old_distance - new_distance)
         # Recompensa por mejorar orientación
         reward += 0.5 * (old_orientation_error - new_orientation_error)
         # Penalización si se acerca demasiado a obstáculos
@@ -217,13 +217,13 @@ class ContinuousParkingEnv(gym.Env):
             reward -= 2.0
         # Penalización por frenar sin estar aparcado
         if action == 6 and not parked:
-            reward -= 1.0
+            reward -= 0.5
         # Penalización fuerte por colisión
         if collision:
-            reward -= 100.0
+            reward -= 50
         # Recompensa fuerte por aparcar correctamente
         if parked:
-            reward += 100.0
+            reward += 50
         return float(reward)
 
     def _distance_to_goal(self):
