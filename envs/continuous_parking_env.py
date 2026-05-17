@@ -24,6 +24,10 @@ class ContinuousParkingEnv(gym.Env):
         self.world_width = 10.0
         self.world_height = 6.0
 
+        self.previous_action = None
+        self.best_distance_to_goal = None
+        self.stagnation_steps = 0
+
         # Parámetros de simulación
         self.dt = 0.1  # lo que avanza cada acción en segundos 
         self.max_steps = 300 #limite pasos por episodio
@@ -102,6 +106,9 @@ class ContinuousParkingEnv(gym.Env):
         self.theta = 0.0
         self.v = 0.0
         self.steps = 0
+        self.previous_action = None
+        self.best_distance_to_goal = self._distance_to_goal()
+        self.stagnation_steps = 0
         self.previous_distance_to_goal = self._distance_to_goal()
         self.previous_orientation_error = abs(self._orientation_error())
         obs = self._get_obs() #observacion inicial del entorno, se calcula a partir del estado interno y se devuelve al agente
@@ -196,7 +203,8 @@ class ContinuousParkingEnv(gym.Env):
             "steps": int(self.steps),
         }
 
-    def _compute_reward(self,
+    def _compute_reward(
+        self,
         action,
         old_distance,
         new_distance,
@@ -204,26 +212,68 @@ class ContinuousParkingEnv(gym.Env):
         new_orientation_error,
         min_sensor_distance,
         collision,
-        parked):
-        """con toda la informacion del paso actual y el anterior calculamos la recompensa"""
-        # Penalización pequeña por cada paso
-        reward = -0.05
-        # Recompensa por acercarse a la plaza
-        reward += 3.0 * (old_distance - new_distance)
-        # Recompensa por mejorar orientación
-        reward += 0.5 * (old_orientation_error - new_orientation_error)
-        # Penalización si se acerca demasiado a obstáculos
+        parked
+    ):
+        """Lejos de la plaza → lo importante es acercarse.
+        Cerca de la plaza → lo importante es orientar bien.
+        Cuando está cerca y orientado → frenar es bueno.
+        Frenar lejos → malo.
+        Oscilar → malo.
+        Chocar → muy malo."""
+        reward = -0.08
+
+        # Progreso hacia la plaza
+        delta_distance = old_distance - new_distance
+        reward += 4.0 * delta_distance
+
+        # Si no hay progreso real, pequeña penalización
+        if abs(delta_distance) < 0.003:
+            reward -= 0.03
+
+        # Orientación: más importante cerca del objetivo
+        delta_orientation = old_orientation_error - new_orientation_error
+
+        if new_distance < 1.0:
+            reward += 2.0 * delta_orientation
+        else:
+            reward += 0.5 * delta_orientation
+
+        # Penalización por riesgo
         if min_sensor_distance < 0.15:
-            reward -= 2.0
-        # Penalización por frenar sin estar aparcado
-        if action == 6 and not parked:
-            reward -= 0.5
-        # Penalización fuerte por colisión
+            reward -= 4.0
+        elif min_sensor_distance < 0.30:
+            reward -= 1.0
+
+        # Penalización por oscilación
+        reverse_pairs = {
+            (0, 3), (3, 0),
+            (1, 5), (5, 1),
+            (2, 4), (4, 2),
+        }
+
+        if self.previous_action is not None:
+            if (self.previous_action, action) in reverse_pairs:
+                reward -= 0.7
+
+        # Frenar lejos está mal, pero frenar cerca y alineado está bien
+        if action == 6:
+            if new_distance < 0.45 and new_orientation_error < 0.40:
+                reward += 5.0
+            else:
+                reward -= 1.0
+
+        # Colisión
         if collision:
-            reward -= 50
-        # Recompensa fuerte por aparcar correctamente
+            reward -= 120.0
+
+        # Bonus progresivo por estar muy cerca del centro de la plaza
+        if new_distance < 0.45:
+            reward += 2.0 * (0.45 - new_distance)
+
+        # Aparcamiento correcto
         if parked:
-            reward += 50
+            reward += 150.0
+
         return float(reward)
 
     def _distance_to_goal(self):
@@ -291,6 +341,11 @@ class ContinuousParkingEnv(gym.Env):
         parked = self._is_parked(action)
 
         new_distance = self._distance_to_goal() #nueva distancia a objetivo para calcular recompensa
+        if new_distance < self.best_distance_to_goal - 0.01:
+            self.best_distance_to_goal = new_distance
+            self.stagnation_steps = 0
+        else:
+            self.stagnation_steps += 1
         #actualizamos el resto de valores 
         new_orientation_error = abs(self._orientation_error())
         min_sensor_distance = np.min(self._compute_sensors())
@@ -306,9 +361,13 @@ class ContinuousParkingEnv(gym.Env):
             parked=parked)
 
         terminated = collision or parked
-        truncated = self.steps >= self.max_steps
+        # Si durante 80 pasos no mejora su mejor distancia al objetivo, se corta el episodio y se penaliza.
+        truncated = self.steps >= self.max_steps or self.stagnation_steps >= 80
+        if self.stagnation_steps >= 80:
+            reward -= 20.0
         obs = self._get_obs()
         info = self._get_info(collision=collision, parked=parked)
+        self.previous_action = int(action)
         return obs, reward, terminated, truncated, info
 
     def render(self):
@@ -360,19 +419,20 @@ class ContinuousParkingEnv(gym.Env):
             self.ax = None
 
 
-#para ver como es el entorno simulado y probar que funciona 
-env = ContinuousParkingEnv(render_mode="human")
+if __name__ == "__main__":
+    #Prueba rápida del entorno con acciones aleatorias
+    env = ContinuousParkingEnv(render_mode="human")
 
-obs, info = env.reset()
+    obs, info = env.reset()
 
-for step in range(50):
-    action = env.action_space.sample()
-    obs, reward, terminated, truncated, info = env.step(action)
-    
-    env.render()
-    
-    if terminated or truncated:
-        print("Episodio terminado")
-        break
+    for step in range(50):
+        action = env.action_space.sample()
+        obs, reward, terminated, truncated, info = env.step(action)
 
-env.close()
+        env.render()
+
+        if terminated or truncated:
+            print("Episodio terminado")
+            break
+
+    env.close()
