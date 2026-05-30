@@ -234,7 +234,7 @@ class ContinuousParkingEnv(gym.Env):
         delta_orientation = old_orientation_error - new_orientation_error
 
         if new_distance < 1.0:
-            reward += 2.0 * delta_orientation
+            reward += 3.0 * delta_orientation
         else:
             reward += 0.5 * delta_orientation
 
